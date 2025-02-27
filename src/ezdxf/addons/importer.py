@@ -50,6 +50,7 @@ IMPORT_ENTITIES = {
     "DIMENSION",
     "LEADER",  # dimension style override not supported!
     "VIEWPORT",
+    "3DSOLID",
 }
 
 
