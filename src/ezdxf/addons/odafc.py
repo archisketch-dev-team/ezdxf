@@ -478,6 +478,9 @@ def _odafc_failed(system: str, returncode: int, stderr: str) -> bool:
     if system == LINUX:
         # ODAFileConverter *always* crashes on Linux even if the output was successful
         return stderr != "" and stderr != "Quit (core dumped)"
+    elif system == DARWIN:
+        # ODAFileConverter when run in GUI has string inside stderr. Only check for returncode.
+        return returncode != 0
     elif returncode != 0:
         return True
     else:
