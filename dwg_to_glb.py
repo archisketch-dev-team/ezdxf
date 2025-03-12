@@ -114,35 +114,51 @@ def split_faces_by_holes(faces: list[tuple[int]], holes: list[tuple[int]], verts
             converted_pairs.append((face_coords, hole_coords))
         return converted_pairs
 
-    converted_pairs = convert_to_coordinates(matching_pairs, verts)
+    face_to_hole_as_verts = convert_to_coordinates(matching_pairs, verts)
 
-    def convert_to_2d(pairs):
-        def remove_constant_axis(coords):
-            if all(coord[0] == coords[0][0] for coord in coords):
-                return [(coord[1], coord[2]) for coord in coords]
-            elif all(coord[1] == coords[0][1] for coord in coords):
-                return [(coord[0], coord[2]) for coord in coords]
-            elif all(coord[2] == coords[0][2] for coord in coords):
-                return [(coord[0], coord[1]) for coord in coords]
-            return coords  # In case no axis is constant, return original
+    # 2d 좌표로 변환
+    def remove_constant_axis(coords):
+        if all(coord[0] == coords[0][0] for coord in coords):
+            return [(coord[1], coord[2]) for coord in coords], 0, coords[0][0]
+        elif all(coord[1] == coords[0][1] for coord in coords):
+            return [(coord[0], coord[2]) for coord in coords], 1, coords[0][1]
+        elif all(coord[2] == coords[0][2] for coord in coords):
+            return [(coord[0], coord[1]) for coord in coords], 2, coords[0][2]
+        return coords, -1, None  # In case no axis is constant, return original
 
-        converted_2d_pairs = []
-        for face_coords, hole_coords in pairs:
-            face_2d = remove_constant_axis(face_coords)
-            hole_2d = remove_constant_axis(hole_coords)
-            converted_2d_pairs.append((face_2d, hole_2d))
-        return converted_2d_pairs
+    def add_constant_axis(coords, axis, value):
+        if axis == 0:
+            return [(value, coord[0], coord[1]) for coord in coords]
+        elif axis == 1:
+            return [(coord[0], value, coord[1]) for coord in coords]
+        elif axis == 2:
+            return [(coord[0], coord[1], value) for coord in coords]
+        return coords  # In case no axis is constant, return original
 
-    converted_2d_pairs = convert_to_2d(converted_pairs)
-
-    # create shapely polygon with faces in converted_2d_pairs
     polygons = []
-    for face, hole in converted_2d_pairs:
-        polygon = Polygon(face, [hole])
-        polygons.append(polygon)
-    triangles = [tri for tri in shapely.delaunay_triangles(polygons[0]).geoms if tri.within(polygons[0])]
+    triangle_3ds = []
+    for face_coords, hole_coords in face_to_hole_as_verts:
+        converted_2d_pairs = []
+        face_2d, axis, value = remove_constant_axis(face_coords)
+        hole_2d, _, _ = remove_constant_axis(hole_coords)
+        converted_2d_pairs.append((face_2d, hole_2d))
 
-    return polygons
+        # create shapely polygon with faces in converted_2d_pairs
+        for face, hole in converted_2d_pairs:
+            polygon = Polygon(face, [hole])
+            polygons.append(polygon)
+            triangles = [tri for tri in shapely.delaunay_triangles(polygon).geoms if tri.within(polygon)]
+
+            # Revert 2D triangles back to 3D coordinates
+            triangles_3d = []
+            for tri in triangles:
+                tri_coords = list(tri.exterior.coords)[:-1]  # Remove the closing coordinate
+                tri_3d = add_constant_axis(tri_coords, axis, value)
+                triangles_3d.append(tri_3d)
+
+            triangle_3ds.extend(triangles_3d)
+
+    return triangle_3ds
 
 
 def extract_3dsolid_with_position_to_obj(dxf_path):
