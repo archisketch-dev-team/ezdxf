@@ -2,7 +2,7 @@
 #  License: MIT License
 from __future__ import annotations
 from typing import Iterator, Sequence, Optional, Iterable
-from ezdxf.render import MeshVertexMerger, MeshTransformer, MeshBuilder
+from src.ezdxf.render.mesh import MeshVertexMerger, MeshTransformer, MeshBuilder
 from ezdxf.math import Matrix44, Vec3, NULLVEC, BoundingBox
 from . import entities
 from .entities import Body, Lump, NONE_REF, Face, Shell
@@ -45,6 +45,9 @@ def mesh_from_body(body: Body, merge_lumps=True) -> list[MeshTransformer]:
         if not merge_lumps:
             meshes.append(MeshTransformer.from_builder(builder))
             builder = MeshVertexMerger()
+    for holes in flat_polygon_holes_from_body(body):
+        for hole in holes:
+            builder.add_hole(hole)
     if merge_lumps:
         meshes.append(MeshTransformer.from_builder(builder))
     return meshes
@@ -78,6 +81,21 @@ def flat_polygon_faces_from_body(
         lump = lump.next_lump
 
 
+def flat_polygon_holes_from_body(
+        body: Body,
+) -> Iterator[list[Sequence[Vec3]]]:
+    if not isinstance(body, Body):
+        raise TypeError(f"expected a body entity, got: {type(body)}")
+    lump = body.lump
+    transform = body.transform
+
+    m: Optional[Matrix44] = None
+    if not transform.is_none:
+        m = transform.matrix
+    while not lump.is_none:
+        yield list(flat_polygon_holes_from_lump(lump, m))
+        lump = lump.next_lump
+
 def flat_polygon_faces_from_lump(
     lump: Lump, m: Matrix44 | None = None
 ) -> Iterator[Sequence[Vec3]]:
@@ -102,14 +120,20 @@ def flat_polygon_faces_from_lump(
     vertices: list[Vec3] = []
     face = shell.face
     while not face.is_none:
-        first_coedge = NONE_REF
+        first_loop_coedge = NONE_REF
+        second_loop_coedge = NONE_REF
         vertices.clear()
         if face.surface.type == "plane-surface":
             try:
-                first_coedge = face.loop.coedge
+                first_loop_coedge = face.loop.coedge
+                second_loop_coedge = face.loop.next_loop.coedge
             except AttributeError:  # loop is a none-entity
                 pass
-        coedge = first_coedge
+        # face에 next loop이 있을 경우 hole이므로 next loop(face)을 저장
+        if not second_loop_coedge.is_none:
+            coedge = second_loop_coedge
+        else:
+            coedge = first_loop_coedge
         while not coedge.is_none:  # invalid coedge or face is not closed
             # the edge entity contains the vertices and the curve type
             edge = coedge.edge
@@ -127,12 +151,75 @@ def flat_polygon_faces_from_lump(
                 # incompatible entity type -> ignore this face!
                 break
             coedge = coedge.next_coedge
-            if coedge is first_coedge:  # a valid closed face
+            if coedge is first_loop_coedge or coedge is second_loop_coedge:  # a valid closed face
                 if m is not None:
                     yield tuple(m.transform_vertices(vertices))
                 else:
                     yield tuple(vertices)
                 break
+        face = face.next_face
+
+
+def flat_polygon_holes_from_lump(
+        lump: Lump, m: Matrix44 | None = None
+) -> Iterator[Sequence[Vec3]]:
+    """Yields all flat polygon faces from the given :class:`Lump` entity as
+    sequence of :class:`~ezdxf.math.Vec3` instances. Applies the transformation
+    :class:`~ezdxf.math.Matrix44` `m` to all vertices if not ``None``.
+
+    Args:
+        lump: :class:`Lump` entity
+        m: optional transformation matrix
+
+    Raises:
+        TypeError: `lump` has invalid ACIS type
+
+    """
+    if not isinstance(lump, Lump):
+        raise TypeError(f"expected a lump entity, got: {type(lump)}")
+
+    shell = lump.shell
+    if shell.is_none:
+        return  # not a shell
+    vertices: list[Vec3] = []
+    face = shell.face
+    while not face.is_none:
+        first_loop_coedge = NONE_REF
+        second_loop_coedge = NONE_REF
+        vertices.clear()
+        if face.surface.type == "plane-surface":
+            try:
+                first_loop_coedge = face.loop.coedge
+                second_loop_coedge = face.loop.next_loop.coedge
+            except AttributeError:  # loop is a none-entity
+                pass
+        if second_loop_coedge.is_none:
+            yield ()
+        else:
+            coedge = first_loop_coedge
+            while not coedge.is_none:  # invalid coedge or face is not closed
+                # the edge entity contains the vertices and the curve type
+                edge = coedge.edge
+                try:
+                    # only straight lines as face edges supported:
+                    if edge.curve.type != "straight-curve":
+                        break
+                    # add the first edge vertex to the face vertices
+                    if coedge.sense:  # reversed sense of the underlying edge
+                        vertices.append(edge.end_vertex.point.location)
+                    else:  # same sense as the underlying edge
+                        vertices.append(edge.start_vertex.point.location)
+                except AttributeError:
+                    # one of the involved entities is a none-entity or an
+                    # incompatible entity type -> ignore this face!
+                    break
+                coedge = coedge.next_coedge
+                if coedge is first_loop_coedge:  # a valid closed face
+                    if m is not None:
+                        yield tuple(m.transform_vertices(vertices))
+                    else:
+                        yield tuple(vertices)
+                    break
         face = face.next_face
 
 
