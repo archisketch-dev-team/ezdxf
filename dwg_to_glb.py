@@ -10,7 +10,7 @@ import ezdxf
 import pybase64
 import shapely
 
-from shapely import Polygon
+from shapely import Polygon, validation
 from ezdxf.addons import odafc
 from src.ezdxf.acis import api
 
@@ -104,6 +104,8 @@ def convert_dwg_to_gltf(filename: str) -> str:
 def split_faces_by_holes(faces: list[tuple[int]], holes: list[tuple[int]], verts: list[tuple[float]]) -> list:
     # hole이 있는 face와 해당 hole을 매칭
     matching_pairs = [(face, hole) for face, hole in zip(faces, holes) if hole]
+    # hole이 없는 face를 필터링
+    faces_without_holes = [face for face, hole in zip(faces, holes) if not hole]
 
     # face와 hole의 인덱스를 좌표로 변환
     def convert_to_coordinates(pairs, vertices):
@@ -146,6 +148,9 @@ def split_faces_by_holes(faces: list[tuple[int]], holes: list[tuple[int]], verts
         # create shapely polygon with faces in converted_2d_pairs
         for face, hole in converted_2d_pairs:
             polygon = Polygon(face, [hole])
+            if not polygon.is_valid:
+                print(f"Invalid polygon: {validation.explain_validity(polygon)}")
+                continue
             polygons.append(polygon)
             triangles = [tri for tri in shapely.delaunay_triangles(polygon).geoms if tri.within(polygon)]
 
@@ -158,7 +163,17 @@ def split_faces_by_holes(faces: list[tuple[int]], holes: list[tuple[int]], verts
 
             triangle_3ds.extend(triangles_3d)
 
-    return triangle_3ds
+    # Create a mapping from vertex coordinates to their indices
+    vert_to_index = {tuple(v): i for i, v in enumerate(verts)}
+
+    # Convert triangles_3d to tuples of indices
+    triangles_as_indices = []
+    for tri in triangle_3ds:
+        tri_indices = tuple(vert_to_index[tuple(coord)] for coord in tri)
+        triangles_as_indices.append(tri_indices)
+
+    all_faces = triangles_as_indices + faces_without_holes
+    return all_faces
 
 
 def extract_3dsolid_with_position_to_obj(dxf_path):
@@ -203,6 +218,11 @@ def extract_3dsolid_with_position_to_obj(dxf_path):
                             mesh.normalize_faces()
                             verts = [tuple(v) for v in mesh.vertices]
                             faces = [tuple(face) for face in mesh.faces]
+                            holes = mesh.holes
+
+                            if not all(hole == () for hole in holes):
+                                print("Hole Detected: solid count = ", solid_count)
+                                faces = split_faces_by_holes(faces, holes, verts)
 
                             if verts and faces:
                                 # 🔹 블록의 위치, 스케일, 회전 적용
@@ -249,7 +269,9 @@ def extract_3dsolid_with_position_to_obj(dxf_path):
                     faces = [tuple(face) for face in mesh.faces]
                     holes = mesh.holes
 
-                    split_faces = split_faces_by_holes(faces, holes, verts)
+                    if not all(hole == () for hole in holes):
+                        print("Hole Detected: solid count = ", solid_count)
+                        faces = split_faces_by_holes(faces, holes, verts)
                     if verts and faces:
                         transformed_verts = apply_transformation(verts, translation, scale, rotation)
                         obj_filename = f"3DSOLID_{solid_count}.obj"
