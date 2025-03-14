@@ -437,6 +437,7 @@ class MeshBuilder:
         self.vertices: list[Vec3] = []
         # face storage, each face is a tuple of vertex indices (v0, v1, v2, v3, ....)
         self.faces: list[Sequence[int]] = []
+        self.holes: list[Sequence[int]] = []
 
     def bbox(self) -> BoundingBox:
         """Returns the :class:`~ezdxf.math.BoundingBox` of the mesh."""
@@ -501,6 +502,22 @@ class MeshBuilder:
 
         """
         self.faces.append(self.add_vertices(vertices))
+
+    def add_hole(self, vertices: Iterable[UVec]) -> None:
+        """Add a face as vertices list to the mesh. A face requires at least 3
+        vertices, each vertex is a ``(x, y, z)`` tuple or
+        :class:`~ezdxf.math.Vec3` object. The new vertex indices are stored as
+        face in the :attr:`faces` list.
+
+        Args:
+            vertices: list of at least 3 vertices ``[(x1, y1, z1), (x2, y2, z2),
+                (x3, y3, y3), ...]``
+
+        """
+        if not vertices:
+            self.holes.append(())
+        else:
+            self.holes.append(self.add_vertices(vertices))
 
     def add_vertices(self, vertices: Iterable[UVec]) -> Face:
         """Add new vertices to the mesh, each vertex is a ``(x, y, z)`` tuple
@@ -769,6 +786,7 @@ class MeshBuilder:
         # DO NOT COPY CACHES!
         mesh.vertices = list(other.vertices)
         mesh.faces = list(other.faces)
+        mesh.holes = list(other.holes)
         return mesh  # type: ignore
 
     def merge_coplanar_faces(self, passes: int = 1) -> MeshTransformer:
