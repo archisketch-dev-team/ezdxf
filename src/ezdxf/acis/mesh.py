@@ -2,7 +2,7 @@
 #  License: MIT License
 from __future__ import annotations
 from typing import Iterator, Sequence, Optional, Iterable
-from src.ezdxf.render.mesh import MeshVertexMerger, MeshTransformer, MeshBuilder
+from ezdxf.render import MeshVertexMerger, MeshTransformer, MeshBuilder
 from ezdxf.math import Matrix44, Vec3, NULLVEC, BoundingBox
 from . import entities
 from .entities import Body, Lump, NONE_REF, Face, Shell
@@ -216,6 +216,7 @@ def flat_polygon_holes_from_lump(
                 coedge = coedge.next_coedge
                 if coedge is first_loop_coedge:  # a valid closed face
                     if m is not None:
+                        transformed = list(m.transform_vertices(vertices))
                         yield tuple(m.transform_vertices(vertices))
                     else:
                         yield tuple(vertices)
